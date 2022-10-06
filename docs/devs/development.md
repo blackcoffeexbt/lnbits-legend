@@ -11,6 +11,11 @@ For developers
 
 Thanks for contributing :)
 
+Running LNbits with the reload flag enabled
+====
+```
+poetry run uvicorn lnbits.__main__:app --host=0.0.0.0 --port=5000 --reload
+```
 
 Tests
 =====
