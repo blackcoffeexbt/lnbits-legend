@@ -194,8 +194,8 @@ class LnTipsFundingSource(LNbitsSettings):
 
 
 class LNbitsConnectFundingSource(LNbitsSettings):
-    lnbits_connect_nsec: Optional[str] = Field(default=None)
-    lnbits_connect_npub: Optional[str] = Field(default=None)
+    lnbits_connect_sk: Optional[str] = Field(default=None)
+    lnbits_connect_pk: Optional[str] = Field(default=None)
 
 
 # todo: must be extracted
