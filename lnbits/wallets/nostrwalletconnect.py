@@ -327,45 +327,30 @@ class NostrWalletConnectWallet(Wallet):
             **kwargs,
     ) -> InvoiceResponse:
         logger.info("Create an invoice")
-        # Steps:
-        # 1. create json object with type = create_invoice, funding source pubkey and amount
-        data = {
+        eventdata = {
             "method": "create_invoice",
             "params": {
                 "amount": amount,
                 "memo": memo or "",
                 "description_hash": description_hash.hex() if description_hash else "",
-                "unhashed_description": unhashed_description.hex() if unhashed_description else "",
             }
         }
-        # create dm
-        encrypted_data = self.encrypt_message(json.dumps(data), self.secret, self.wallet_connect_service_pubkey)
+        encrypted_data = self.encrypt_message(json.dumps(eventdata), self.secret, self.wallet_connect_service_pubkey)
         event = self.build_encrypted_event(encrypted_data, self.secret, self.wallet_connect_service_pubkey,
                                            NostrEventType.WALLET_CONNECT_REQUEST)
-        # 2. broadcast event
         await self.nostr_client.publish_nostr_event(event)
-        # 3. wait for response from funding source
-        # 4. decode response and
-
-        data: Dict = {"amount": amount, "description_hash": "", "memo": memo or ""}
-        if description_hash:
-            data["description_hash"] = description_hash.hex()
-        elif unhashed_description:
-            data["description_hash"] = hashlib.sha256(unhashed_description).hexdigest()
-
-        data[
-            "payment_hash"
-        ] = "c1c9721247a875ba60aa534b992b42c5a3da81e66537af435ee8835bd0eb97dc"
-        data[
-            "payment_request"
-        ] = "lnbc100n1pjskg4fsp5vpgpp83awjhs5asa3fl0hhezm30ftzwzywvq6m7za7jwfg32l27qpp5c8yhyyj84p6m5c922d9ej26zck3a4q0xv5m67s67azp4h58tjlwqdq2f38xy6t5wvxqzjccqpjrzjq2e0f6yh2eyluj4vmmz2gh205z8u5hn0gv69kcpvegpcum2dznl95zlteuqq92gqqyqqqqqqqqqqq7qqjq9qxpqysgqd46ug2c7dcdf6pglyuj4s2dfuxv8y5hxgadscftkw49vqwlxrv8s36ay746c52gqnrd276ch9pf8acuw5duj34v0n0z6wwyer052hhsqv36rn8"
+        # 3. await for response from funding source: Use asyncio Events for this probably??
+        # TODO: Insert await event here
+        # 4. decode response and show invoice
+        #  TODO: this data Dict will be constructed using the response from the wallet service
+        data: Dict = {
+            "payment_hash":"c1c9721247a875ba60aa534b992b42c5a3da81e66537af435ee8835bd0eb97dc",
+            "payment_request": "lnbc100n1pjskg4fsp5vpgpp83awjhs5asa3fl0hhezm30ftzwzywvq6m7za7jwfg32l27qpp5c8yhyyj84p6m5c922d9ej26zck3a4q0xv5m67s67azp4h58tjlwqdq2f38xy6t5wvxqzjccqpjrzjq2e0f6yh2eyluj4vmmz2gh205z8u5hn0gv69kcpvegpcum2dznl95zlteuqq92gqqyqqqqqqqqqqq7qqjq9qxpqysgqd46ug2c7dcdf6pglyuj4s2dfuxv8y5hxgadscftkw49vqwlxrv8s36ay746c52gqnrd276ch9pf8acuw5duj34v0n0z6wwyer052hhsqv36rn8"
+        }
 
         return InvoiceResponse(
             True, data["payment_hash"], data["payment_request"], None
         )
-        # return InvoiceResponse(
-        #     ok=False, error_message="NostrWalletConnectWallet cannot create invoices."
-        # )
 
     async def pay_invoice(self, *_, **__) -> PaymentResponse:
         return PaymentResponse(
