@@ -55,7 +55,8 @@ def sign_message_hash(private_key: str, hash: bytes) -> str:
 def derive_public_key(private_key):
     privkey = secp256k1.PrivateKey(bytes.fromhex(private_key))
     pubkey = privkey.pubkey.serialize(compressed=True)
-    return pubkey.hex()
+    # remove hex prefix, first 2 chars
+    return pubkey.hex()[2:]
 
 def test_decrypt_encrypt(encoded_message: str, encryption_key):
     msg = decrypt_message(encoded_message, encryption_key)
