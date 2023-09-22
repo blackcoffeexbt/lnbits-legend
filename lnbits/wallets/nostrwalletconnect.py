@@ -335,8 +335,7 @@ class NostrWalletConnectWallet(Wallet):
                 "description_hash": description_hash.hex() if description_hash else "",
             }
         }
-        encrypted_data = self.encrypt_message(json.dumps(eventdata), self.secret, self.wallet_connect_service_pubkey)
-        event = self.build_encrypted_event(encrypted_data, self.secret, self.wallet_connect_service_pubkey,
+        event = self.build_encrypted_event(json.dumps(eventdata), self.secret, self.wallet_connect_service_pubkey,
                                            NostrEventType.WALLET_CONNECT_REQUEST)
         await self.nostr_client.publish_nostr_event(event)
         # 3. await for response from funding source: Use asyncio Events for this probably??
