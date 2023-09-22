@@ -149,7 +149,7 @@ class NostrClient:
         dm_time = int(time.time())
         dm_filters = self._filters_for_direct_messages(public_keys, dm_time)
 
-        self.subscription_id = "lnbitsconnect-" + urlsafe_short_hash()[:32]
+        self.subscription_id = "nostrwalletconnect-" + urlsafe_short_hash()[:32]
         await self.send_req_queue.put(["REQ", self.subscription_id] + dm_filters)
         # log dm_filters
         logger.debug(dm_filters)
@@ -282,7 +282,7 @@ class NostrClient:
         logger.debug(f"Unsubscribed from subscription id: {subscription_id}")
 
 
-class LNbitsConnectWallet(Wallet):
+class NostrWalletConnectWallet(Wallet):
     def __init__(self):
         from lnbits.tasks import catch_everything_and_restart
         from lnbits.app import settings
@@ -291,8 +291,8 @@ class LNbitsConnectWallet(Wallet):
         
         scheduled_tasks: List[Task] = []
         
-        self.nsec = settings.lnbits_connect_sk
-        self.funding_source_npub = settings.lnbits_connect_pk
+        self.secret = settings.nostr_wallet_connect_secret
+        self.funding_source_pubkey = settings.nostr_wallet_connect_pubkey
         
         async def _subscribe_to_nostr_client():
             # wait for 'nostrclient' extension to initialize
@@ -312,7 +312,7 @@ class LNbitsConnectWallet(Wallet):
 
     async def status(self) -> StatusResponse:
         logger.warning(
-            "This LNbitsConnectWallet backend does nothing, it is here just as a placeholder, you must"
+            "This NostrWalletConnectWallet backend does nothing, it is here just as a placeholder, you must"
             " configure an actual backend before being able to do anything useful with"
             " LNbits."
         )
@@ -354,12 +354,12 @@ class LNbitsConnectWallet(Wallet):
             True, data["payment_hash"], data["payment_request"], None
         )
         # return InvoiceResponse(
-        #     ok=False, error_message="LNbitsConnectWallet cannot create invoices."
+        #     ok=False, error_message="NostrWalletConnectWallet cannot create invoices."
         # )
 
     async def pay_invoice(self, *_, **__) -> PaymentResponse:
         return PaymentResponse(
-            ok=False, error_message="LNbitsConnectWallet cannot pay invoices."
+            ok=False, error_message="NostrWalletConnectWallet cannot pay invoices."
         )
 
     async def get_invoice_status(self, *_, **__) -> PaymentStatus:
@@ -393,10 +393,10 @@ class LNbitsConnectWallet(Wallet):
             await self.process_nostr_message(message)
 
     async def subscribe_to_wallet_service(self, nostr_client: NostrClient):
-        # get env LNBITS_CONNECT_PK value
+        # get env NOSTR_WALLET_CONNECT_PUBKEY value
         logger.info("Subscribing to wallet service")
-        logger.info(f"Wallet service npub: {settings.lnbits_connect_pk}")
-        public_keys = [settings.lnbits_connect_pk]
+        logger.info(f"Wallet service pubkey: {settings.nostr_wallet_connect_pubkey}")
+        public_keys = [settings.nostr_wallet_connect_pubkey]
 
         await nostr_client.subscribe_wallet_service(public_keys)
         

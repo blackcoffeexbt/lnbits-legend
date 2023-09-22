@@ -14,7 +14,7 @@ from .corelightningrest import CoreLightningRestWallet
 from .eclair import EclairWallet
 from .fake import FakeWallet
 from .lnbits import LNbitsWallet
-from .lnbitsconnect import LNbitsConnectWallet
+from .nostrwalletconnect import NostrWalletConnectWallet
 from .lndgrpc import LndWallet
 from .lndrest import LndRestWallet
 from .lnpay import LNPayWallet
