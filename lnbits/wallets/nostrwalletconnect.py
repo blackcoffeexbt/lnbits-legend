@@ -17,6 +17,14 @@ from loguru import logger
 from lnbits.settings import settings
 from lnbits.helpers import urlsafe_short_hash
 
+from lnbits.nostrhelpers import (
+    decrypt_message,
+    encrypt_message,
+    get_shared_secret,
+    sign_message_hash,
+    derive_public_key
+)
+
 from .base import (
     InvoiceResponse,
     PaymentResponse,
@@ -222,34 +230,11 @@ class NostrClient:
             logger.debug(ex)
 
     def _filters_for_direct_messages(self, public_keys: List[str], since: int) -> List:
-        in_messages_filter = {"kinds": [4], "#p": public_keys}
         out_messages_filter = {"kinds": [4], "authors": public_keys}
         if since and since != 0:
-            in_messages_filter["since"] = since
             out_messages_filter["since"] = since
 
-        return [in_messages_filter, out_messages_filter]
-
-    def _filters_for_stall_events(self, public_keys: List[str], since: int) -> List:
-        stall_filter = {"kinds": [30017], "authors": public_keys}
-        if since and since != 0:
-            stall_filter["since"] = since
-
-        return [stall_filter]
-
-    def _filters_for_product_events(self, public_keys: List[str], since: int) -> List:
-        product_filter = {"kinds": [30018], "authors": public_keys}
-        if since and since != 0:
-            product_filter["since"] = since
-
-        return [product_filter]
-
-    def _filters_for_user_profile(self, public_keys: List[str], since: int) -> List:
-        profile_filter = {"kinds": [0], "authors": public_keys}
-        if since and since != 0:
-            profile_filter["since"] = since
-
-        return [profile_filter]
+        return [out_messages_filter]
 
     async def restart(self):
         await self.unsubscribe_merchants()
@@ -443,3 +428,28 @@ class NostrWalletConnectWallet(Wallet):
         #     await _handle_incoming_dms(event, merchant, clear_text_msg)
         # else:
         #     logger.warning(f"Bad NIP04 event: '{event.id}'")
+
+    def sign_hash(self, private_key: str, hash: bytes) -> str:
+        return sign_message_hash(private_key, hash)
+
+    def decrypt_message(self, encrypted_message: str, private_key: str, public_key: str) -> str:
+        encryption_key = get_shared_secret(private_key, public_key)
+        return decrypt_message(encrypted_message, encryption_key)
+
+    def encrypt_message(self, clear_text_message: str, private_key: str, public_key: str) -> str:
+        encryption_key = get_shared_secret(private_key, public_key)
+        return encrypt_message(clear_text_message, encryption_key)
+
+    def build_dm_event(self, message: str, from_pubkey: str, to_pubkey: str) -> NostrEvent:
+        content = self.encrypt_message(message, to_pubkey)
+        event = NostrEvent(
+            pubkey=derive_public_key(from_pubkey),
+            created_at=round(time.time()),
+            kind=4,
+            tags=[["p", to_pubkey]],
+            content=content,
+        )
+        event.id = event.event_id
+        event.sig = self.sign_hash(bytes.fromhex(event.id))
+
+        return event
