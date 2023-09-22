@@ -199,9 +199,9 @@ class LnTipsFundingSource(LNbitsSettings):
     lntips_invoice_key: Optional[str] = Field(default=None)
 
 
-class LNbitsConnectFundingSource(LNbitsSettings):
-    lnbits_connect_sk: Optional[str] = Field(default=None)
-    lnbits_connect_pk: Optional[str] = Field(default=None)
+class NostrWalletConnectWalletFundingSource(LNbitsSettings):
+    nostr_wallet_connect_secret: Optional[str] = Field(default=None)
+    nostr_wallet_connect_pubkey: Optional[str] = Field(default=None)
 
 
 # todo: must be extracted
@@ -229,7 +229,7 @@ class FundingSourcesSettings(
     OpenNodeFundingSource,
     SparkFundingSource,
     LnTipsFundingSource,
-    LNbitsConnectFundingSource,
+    NostrWalletConnectWalletFundingSource,
 ):
     lnbits_backend_wallet_class: str = Field(default="VoidWallet")
 
@@ -313,7 +313,7 @@ class SuperUserSettings(LNbitsSettings):
             "LNPayWallet",
             "LNbitsWallet",
             "OpenNodeWallet",
-            "LNbitsConnectWallet",
+            "NostrWalletConnectWallet",
         ]
     )
 
