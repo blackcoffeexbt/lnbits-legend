@@ -33,6 +33,7 @@ from .base import (
     Wallet,
 )
 
+
 class NostrEvent(BaseModel):
     id: str = ""
     pubkey: str
@@ -83,6 +84,13 @@ class NostrEvent(BaseModel):
     def has_tag_value(self, tag_name: str, tag_value: str) -> bool:
         return tag_value in self.tag_values(tag_name)
 
+
+class NostrEventType:
+    WALLET_CONNECT_INFO = 13194
+    WALLET_CONNECT_REQUEST = 23194
+    WALLET_CONNECT_RESPONSE = 23195
+
+
 class NostrClient:
     def __init__(self):
         self.recieve_event_queue: Queue = Queue()
@@ -91,7 +99,7 @@ class NostrClient:
         self.subscription_id = "nostrmarket-" + urlsafe_short_hash()[:32]
 
     async def connect_to_nostrclient_ws(
-        self, on_open: Callable, on_message: Callable
+            self, on_open: Callable, on_message: Callable
     ) -> WebSocketApp:
         def on_error(_, error):
             logger.warning(error)
@@ -149,13 +157,13 @@ class NostrClient:
 
     async def publish_nostr_event(self, e: NostrEvent):
         await self.send_req_queue.put(["EVENT", e.dict()])
-        
+
     async def subscribe_wallet_service(
-        self,
-        public_keys: List[str],
+            self,
+            public_keys: List[str],
     ):
         dm_time = int(time.time())
-        dm_filters = self._filters_for_direct_messages(public_keys, dm_time)
+        dm_filters = self._filters_for_nostr_wallet_connect_messages(public_keys, dm_time)
 
         self.subscription_id = "nostrwalletconnect-" + urlsafe_short_hash()[:32]
         await self.send_req_queue.put(["REQ", self.subscription_id] + dm_filters)
@@ -167,12 +175,12 @@ class NostrClient:
         )
 
     async def subscribe_merchants(
-        self,
-        public_keys: List[str],
-        dm_time=0,
-        stall_time=0,
-        product_time=0,
-        profile_time=0,
+            self,
+            public_keys: List[str],
+            dm_time=0,
+            stall_time=0,
+            product_time=0,
+            profile_time=0,
     ):
         dm_filters = self._filters_for_direct_messages(public_keys, dm_time)
         stall_filters = self._filters_for_stall_events(public_keys, stall_time)
@@ -180,7 +188,7 @@ class NostrClient:
         profile_filters = self._filters_for_user_profile(public_keys, profile_time)
 
         merchant_filters = (
-            dm_filters + stall_filters + product_filters + profile_filters
+                dm_filters + stall_filters + product_filters + profile_filters
         )
 
         self.subscription_id = "nostrmarket-" + urlsafe_short_hash()[:32]
@@ -197,7 +205,7 @@ class NostrClient:
         profile_filters = self._filters_for_user_profile([pk], 0)
 
         merchant_filters = (
-            dm_filters + stall_filters + product_filters + profile_filters
+                dm_filters + stall_filters + product_filters + profile_filters
         )
 
         subscription_id = "merchant-" + urlsafe_short_hash()[:32]
@@ -231,6 +239,13 @@ class NostrClient:
 
     def _filters_for_direct_messages(self, public_keys: List[str], since: int) -> List:
         out_messages_filter = {"kinds": [4], "authors": public_keys}
+        if since and since != 0:
+            out_messages_filter["since"] = since
+
+        return [out_messages_filter]
+
+    def _filters_for_nostr_wallet_connect_messages(self, public_keys: List[str], since: int) -> List:
+        out_messages_filter = {"kinds": [NostrEventType.WALLET_CONNECT_INFO, NostrEventType.WALLET_CONNECT_REQUEST, NostrEventType.WALLET_CONNECT_RESPONSE], "authors": public_keys}
         if since and since != 0:
             out_messages_filter["since"] = since
 
@@ -271,14 +286,14 @@ class NostrWalletConnectWallet(Wallet):
     def __init__(self):
         from lnbits.tasks import catch_everything_and_restart
         from lnbits.app import settings
-        
+
         self.nostr_client = NostrClient()
-        
+
         scheduled_tasks: List[Task] = []
-        
+
         self.secret = settings.nostr_wallet_connect_secret
-        self.funding_source_pubkey = settings.nostr_wallet_connect_pubkey
-        
+        self.wallet_connect_service_pubkey = settings.nostr_wallet_connect_pubkey
+
         async def _subscribe_to_nostr_client():
             # wait for 'nostrclient' extension to initialize
             await asyncio.sleep(10)
@@ -289,7 +304,7 @@ class NostrWalletConnectWallet(Wallet):
             # wait for this extension to initialize
             await asyncio.sleep(15)
             await self.wait_for_nostr_events(self.nostr_client)
-            
+
         loop = asyncio.get_event_loop()
         task1 = loop.create_task(catch_everything_and_restart(_subscribe_to_nostr_client))
         task2 = loop.create_task(catch_everything_and_restart(_wait_for_nostr_events))
@@ -304,23 +319,33 @@ class NostrWalletConnectWallet(Wallet):
         return StatusResponse(None, 0)
 
     async def create_invoice(
-        self,
-        amount: int,
-        memo: Optional[str] = None,
-        description_hash: Optional[bytes] = None,
-        unhashed_description: Optional[bytes] = None,
-        **kwargs,
+            self,
+            amount: int,
+            memo: Optional[str] = None,
+            description_hash: Optional[bytes] = None,
+            unhashed_description: Optional[bytes] = None,
+            **kwargs,
     ) -> InvoiceResponse:
         logger.info("Create an invoice")
         # Steps:
-        # 1. create nostr event with type = create_invoice, funding source npub and amount
+        # 1. create json object with type = create_invoice, funding source pubkey and amount
+        data = {
+            "method": "create_invoice",
+            "params": {
+                "amount": amount,
+                "memo": memo or "",
+                "description_hash": description_hash.hex() if description_hash else "",
+                "unhashed_description": unhashed_description.hex() if unhashed_description else "",
+            }
+        }
+        # create dm
+        encrypted_data = self.encrypt_message(json.dumps(data), self.secret, self.wallet_connect_service_pubkey)
+        event = self.build_encrypted_event(encrypted_data, self.secret, self.wallet_connect_service_pubkey,
+                                           NostrEventType.WALLET_CONNECT_REQUEST)
         # 2. broadcast event
+        await self.nostr_client.publish_nostr_event(event)
         # 3. wait for response from funding source
         # 4. decode response and
-
-        await self.stub_receive_specific_message(
-            "ws://localhost:8080", "INVOICE_CREATED"
-        )
 
         data: Dict = {"amount": amount, "description_hash": "", "memo": memo or ""}
         if description_hash:
@@ -367,7 +392,7 @@ class NostrWalletConnectWallet(Wallet):
                     return message
                 else:
                     print(f"Received another message: {message}")
-                    
+
     async def wait_for_nostr_events(self, nostr_client: NostrClient):
 
         await self.subscribe_to_wallet_service(nostr_client)
@@ -384,7 +409,7 @@ class NostrWalletConnectWallet(Wallet):
         public_keys = [settings.nostr_wallet_connect_pubkey]
 
         await nostr_client.subscribe_wallet_service(public_keys)
-        
+
     async def process_nostr_message(self, msg: str):
         try:
             type, *rest = json.loads(msg)
@@ -398,11 +423,10 @@ class NostrWalletConnectWallet(Wallet):
 
         except Exception as ex:
             logger.debug(ex)
-            
-            
+
     async def _handle_nip04_message(self, event: NostrEvent):
         sender_public_key = event.pubkey
-        
+
         # TODO: Decrypt the DM and do something depending on the content
         logger.info(f"Received DM from {sender_public_key}")
 
@@ -440,16 +464,20 @@ class NostrWalletConnectWallet(Wallet):
         encryption_key = get_shared_secret(private_key, public_key)
         return encrypt_message(clear_text_message, encryption_key)
 
-    def build_dm_event(self, message: str, from_pubkey: str, to_pubkey: str) -> NostrEvent:
-        content = self.encrypt_message(message, to_pubkey)
+    def build_encrypted_event(self, message: str, from_privkey: str, to_pubkey: str,
+                              event_type: NostrEventType) -> NostrEvent:
+        content = self.encrypt_message(message, from_privkey, to_pubkey)
+        this_pubkey = derive_public_key(from_privkey)
+        logger.info(f"this_pubkey: {this_pubkey}")
         event = NostrEvent(
-            pubkey=derive_public_key(from_pubkey),
+            pubkey=this_pubkey,
             created_at=round(time.time()),
-            kind=4,
+            kind=event_type,
             tags=[["p", to_pubkey]],
             content=content,
         )
         event.id = event.event_id
-        event.sig = self.sign_hash(bytes.fromhex(event.id))
+        logger.info(f"event.id: {event.id}")
+        event.sig = self.sign_hash(from_privkey, bytes.fromhex(event.id))
 
         return event
