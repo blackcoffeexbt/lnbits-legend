@@ -162,6 +162,7 @@ async def pay_invoice(
     extra: Optional[Dict] = None,
     description: str = "",
     conn: Optional[Connection] = None,
+    return_json: bool = False,
 ) -> str:
     """
     Pay a Lightning invoice.
@@ -330,7 +331,14 @@ async def pay_invoice(
                 f" database: {temp_id}"
             )
 
-    return invoice.payment_hash
+    if return_json:
+        response = {
+            "preimage": payment.preimage,
+            "payment_hash": invoice.payment_hash,
+        }
+        return json.dumps(response)
+    else:
+        return invoice.payment_hash
 
 
 async def redeem_lnurl_withdraw(
