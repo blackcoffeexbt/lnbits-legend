@@ -85,7 +85,7 @@ class NostrEvent(BaseModel):
         return tag_value in self.tag_values(tag_name)
 
 
-class NostrEventType:
+class EventKind:
     WALLET_CONNECT_INFO = 13194
     WALLET_CONNECT_REQUEST = 23194
     WALLET_CONNECT_RESPONSE = 23195
@@ -245,7 +245,7 @@ class NostrClient:
         return [out_messages_filter]
 
     def _filters_for_nostr_wallet_connect_messages(self, public_keys: List[str], since: int) -> List:
-        out_messages_filter = {"kinds": [NostrEventType.WALLET_CONNECT_INFO, NostrEventType.WALLET_CONNECT_REQUEST, NostrEventType.WALLET_CONNECT_RESPONSE], "authors": public_keys}
+        out_messages_filter = {"kinds": [EventKind.WALLET_CONNECT_INFO, EventKind.WALLET_CONNECT_REQUEST, EventKind.WALLET_CONNECT_RESPONSE], "authors": public_keys}
         if since and since != 0:
             out_messages_filter["since"] = since
 
@@ -336,7 +336,7 @@ class NostrWalletConnectWallet(Wallet):
             }
         }
         event = self.build_encrypted_event(json.dumps(eventdata), self.secret, self.wallet_connect_service_pubkey,
-                                           NostrEventType.WALLET_CONNECT_REQUEST)
+                                           EventKind.WALLET_CONNECT_REQUEST)
         await self.nostr_client.publish_nostr_event(event)
         # 3. await for response from funding source: Use asyncio Events for this probably??
         # TODO: Insert await event here
@@ -351,7 +351,22 @@ class NostrWalletConnectWallet(Wallet):
             True, data["payment_hash"], data["payment_request"], None
         )
 
-    async def pay_invoice(self, *_, **__) -> PaymentResponse:
+    async def pay_invoice(self, bolt11: str, fee_limit_msat: int) -> PaymentResponse:
+        logger.info("Create an invoice")
+        eventdata = {
+            "method": "pay_invoice",
+            "params": {
+                "invoice": bolt11,
+            }
+        }
+        event = self.build_encrypted_event(json.dumps(eventdata), self.secret, self.wallet_connect_service_pubkey,
+                                           EventKind.WALLET_CONNECT_REQUEST)
+        await self.nostr_client.publish_nostr_event(event)
+        # 3. await for response from funding source: Use asyncio Events for this probably??
+        # TODO: Insert await event here
+        # 4. decode response and show invoice
+        #  TODO: this data Dict will be constructed using the response from the wallet service
+
         return PaymentResponse(
             ok=False, error_message="NostrWalletConnectWallet cannot pay invoices."
         )
@@ -449,7 +464,7 @@ class NostrWalletConnectWallet(Wallet):
         return encrypt_message(clear_text_message, encryption_key)
 
     def build_encrypted_event(self, message: str, from_privkey: str, to_pubkey: str,
-                              event_type: NostrEventType) -> NostrEvent:
+                              event_type: EventKind) -> NostrEvent:
         content = self.encrypt_message(message, from_privkey, to_pubkey)
         this_pubkey = derive_public_key(from_privkey)
         logger.info(f"this_pubkey: {this_pubkey}")
