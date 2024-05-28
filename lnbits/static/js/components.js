@@ -170,7 +170,7 @@ Vue.component('lnbits-extension-list', {
 })
 
 Vue.component('lnbits-manage', {
-  props: ['showAdmin', 'showNode', 'showExtensions'],
+  props: ['showAdmin', 'showNode', 'showExtensions', 'showUsers'],
   methods: {
     isActive: function (path) {
       return window.location.pathname === path
@@ -200,6 +200,14 @@ Vue.component('lnbits-manage', {
           </q-item-section>
           <q-item-section>
             <q-item-label lines="1" v-text="$t('node')"></q-item-label>
+          </q-item-section>
+        </q-item>
+        <q-item v-if="showUsers" clickable tag="a" href="/users" :active="isActive('/users')">
+          <q-item-section side>
+            <q-icon name="groups" :color="isActive('/users') ? 'primary' : 'grey-5'" size="md"></q-icon>
+          </q-item-section>
+          <q-item-section>
+            <q-item-label lines="1" v-text="$t('users')"></q-item-label>
           </q-item-section>
         </q-item>
       </div>
@@ -318,8 +326,8 @@ Vue.component('lnbits-payment-details', {
         this.payment.webhook_status < 0
         ? 'red-10'
         : !this.payment.webhook_status
-        ? 'cyan-7'
-        : 'green-10'
+          ? 'cyan-7'
+          : 'green-10'
     },
     webhookStatusText() {
       return this.payment.webhook_status
@@ -691,9 +699,32 @@ Vue.component('lnbits-update-balance', {
   },
   methods: {
     updateBalance: function (credit) {
-      LNbits.api.updateBalance(credit, this.wallet_id).then(res => {
-        this.callback({value: res, wallet_id: this.wallet_id})
-      })
+      LNbits.api
+        .updateBalance(credit, this.wallet_id)
+        .then(res => {
+          if (res.data.status !== 'Success') {
+            throw new Error(res.data)
+          }
+          this.callback({
+            success: true,
+            credit: parseInt(credit),
+            wallet_id: this.wallet_id
+          })
+        })
+        .then(_ => {
+          credit = parseInt(credit)
+          this.$q.notify({
+            type: 'positive',
+            message: this.$t('wallet_topup_ok', {
+              amount: credit
+            }),
+            icon: null
+          })
+          return credit
+        })
+        .catch(function (error) {
+          LNbits.utils.notifyApiError(error)
+        })
     }
   },
   template: `
