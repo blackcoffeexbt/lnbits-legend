@@ -106,7 +106,8 @@ class NostrClient:
 
         logger.info(f"Subscribing to websockets for nostrclient extension")
         ws = WebSocketApp(
-            f"ws://localhost:{settings.port}/nostrclient/api/v1/relay",
+            f"wss://relay.getalby.com/v1",
+            # f"ws://localhost:{settings.port}/nostrclient/api/v1/relay",
             on_message=on_message,
             on_open=on_open,
             on_error=on_error,
@@ -245,7 +246,8 @@ class NostrClient:
         return [out_messages_filter]
 
     def _filters_for_nostr_wallet_connect_messages(self, public_keys: List[str], since: int) -> List:
-        out_messages_filter = {"kinds": [EventKind.WALLET_CONNECT_INFO, EventKind.WALLET_CONNECT_REQUEST, EventKind.WALLET_CONNECT_RESPONSE], "authors": public_keys}
+        out_messages_filter = {"kinds": [EventKind.WALLET_CONNECT_INFO, EventKind.WALLET_CONNECT_REQUEST,
+                                         EventKind.WALLET_CONNECT_RESPONSE], "authors": public_keys}
         if since and since != 0:
             out_messages_filter["since"] = since
 
@@ -287,6 +289,8 @@ class NostrWalletConnectWallet(Wallet):
         from lnbits.tasks import catch_everything_and_restart
         from lnbits.app import settings
 
+        self.response_event = asyncio.Event()
+        self.response_data = None
         self.nostr_client = NostrClient()
 
         scheduled_tasks: List[Task] = []
@@ -328,7 +332,7 @@ class NostrWalletConnectWallet(Wallet):
     ) -> InvoiceResponse:
         logger.info("Create an invoice")
         eventdata = {
-            "method": "create_invoice",
+            "method": "make_invoice",
             "params": {
                 "amount": amount,
                 "memo": memo or "",
@@ -338,18 +342,18 @@ class NostrWalletConnectWallet(Wallet):
         event = self.build_encrypted_event(json.dumps(eventdata), self.secret, self.wallet_connect_service_pubkey,
                                            EventKind.WALLET_CONNECT_REQUEST)
         await self.nostr_client.publish_nostr_event(event)
-        # 3. await for response from funding source: Use asyncio Events for this probably??
-        # TODO: Insert await event here
-        # 4. decode response and show invoice
-        #  TODO: this data Dict will be constructed using the response from the wallet service
-        data: Dict = {
-            "payment_hash":"c1c9721247a875ba60aa534b992b42c5a3da81e66537af435ee8835bd0eb97dc",
-            "payment_request": "lnbc100n1pjskg4fsp5vpgpp83awjhs5asa3fl0hhezm30ftzwzywvq6m7za7jwfg32l27qpp5c8yhyyj84p6m5c922d9ej26zck3a4q0xv5m67s67azp4h58tjlwqdq2f38xy6t5wvxqzjccqpjrzjq2e0f6yh2eyluj4vmmz2gh205z8u5hn0gv69kcpvegpcum2dznl95zlteuqq92gqqyqqqqqqqqqqq7qqjq9qxpqysgqd46ug2c7dcdf6pglyuj4s2dfuxv8y5hxgadscftkw49vqwlxrv8s36ay746c52gqnrd276ch9pf8acuw5duj34v0n0z6wwyer052hhsqv36rn8"
-        }
+        await self.response_event.wait()
 
-        return InvoiceResponse(
-            True, data["payment_hash"], data["payment_request"], None
-        )
+        if self.response_data:
+            response = json.loads(self.response_data)
+            logger.info(f"Response: {response}")
+            if response["result_type"] == "make_invoice":
+                self.response_event.clear()
+                return InvoiceResponse(
+                    True, response['result']['payment_hash'], response['result']['invoice'], None
+                )
+        else:
+            return InvoiceResponse(False, None, None, "No response received")
 
     async def pay_invoice(self, bolt11: str, fee_limit_msat: int) -> PaymentResponse:
         logger.info("Create an invoice")
@@ -410,14 +414,24 @@ class NostrWalletConnectWallet(Wallet):
         await nostr_client.subscribe_wallet_service(public_keys)
 
     async def process_nostr_message(self, msg: str):
+
         try:
             type, *rest = json.loads(msg)
+            logger.info(f"Type: {type}")
+            logger.info(f"Rest: {rest}")
 
             if type.upper() == "EVENT":
                 _, event = rest
+                logger.info(f"Event: {event}")
                 event = NostrEvent(**event)
                 if event.kind == 4:
+                    logger.info(f"Received DM: {event.content}")
                     await self._handle_nip04_message(event)
+                elif event.kind == EventKind.WALLET_CONNECT_RESPONSE:
+                    logger.info(f"Received Wallet Connect Response: {event.content}")
+                    message = await self._handle_nip04_message(event)
+                    self.response_data = message
+                    self.response_event.set()
                 return
 
         except Exception as ex:
@@ -425,32 +439,8 @@ class NostrWalletConnectWallet(Wallet):
 
     async def _handle_nip04_message(self, event: NostrEvent):
         sender_public_key = event.pubkey
-
-        # TODO: Decrypt the DM and do something depending on the content
-        logger.info(f"Received DM from {sender_public_key}")
-
-        # if not merchant:
-        #     p_tags = event.tag_values("p")
-        #     merchant_public_key = p_tags[0] if len(p_tags) else None
-        #     merchant = (
-        #         await get_merchant_by_pubkey(merchant_public_key)
-        #         if merchant_public_key
-        #         else None
-        #     )
-
-        # assert merchant, f"Merchant not found for public key '{merchant_public_key}'"
-
-        # if event.pubkey == merchant_public_key:
-        #     assert len(event.tag_values("p")) != 0, "Outgong message has no 'p' tag"
-        #     clear_text_msg = merchant.decrypt_message(
-        #         event.content, event.tag_values("p")[0]
-        #     )
-        #     await _handle_outgoing_dms(event, merchant, clear_text_msg)
-        # elif event.has_tag_value("p", merchant_public_key):
-        #     clear_text_msg = merchant.decrypt_message(event.content, event.pubkey)
-        #     await _handle_incoming_dms(event, merchant, clear_text_msg)
-        # else:
-        #     logger.warning(f"Bad NIP04 event: '{event.id}'")
+        message = self.decrypt_message(event.content, self.secret, sender_public_key)
+        return message
 
     def sign_hash(self, private_key: str, hash: bytes) -> str:
         return sign_message_hash(private_key, hash)
