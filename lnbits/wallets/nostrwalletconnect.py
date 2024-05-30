@@ -147,7 +147,6 @@ class NostrClient:
                     running = False
                     logger.warning(str(req))
                 else:
-                    logger.info(f"Sending request: {req}")
                     self.ws.send(json.dumps(req))
             except Exception as ex:
                 logger.warning(ex)
@@ -257,7 +256,7 @@ class NostrClient:
         # Give some time for the CLOSE events to propagate before restarting
         await asyncio.sleep(10)
 
-        logger.info("Restating NostrClient...")
+        logger.info("Restarting NostrClient...")
         await self.send_req_queue.put(ValueError("Restarting NostrClient..."))
         await self.recieve_event_queue.put(ValueError("Restarting NostrClient..."))
 
@@ -345,7 +344,7 @@ class NostrWalletConnectWallet(Wallet):
 
         if self.response_data:
             response = json.loads(self.response_data)
-            logger.info(f"Response: {response}")
+            logger.info("Response: make_invoice")
             if response["result_type"] == "make_invoice":
                 self.response_event.clear()  # Reset the event for future calls
                 payment_hash = response['result']['payment_hash']
@@ -357,7 +356,7 @@ class NostrWalletConnectWallet(Wallet):
             return InvoiceResponse(False, None, None, "No response received")
 
     async def pay_invoice(self, bolt11: str, fee_limit_msat: int) -> PaymentResponse:
-        logger.info("Pay an invoice")
+        logger.info("request pay_invoice")
         eventdata = {
             "method": "pay_invoice",
             "params": {
@@ -371,8 +370,8 @@ class NostrWalletConnectWallet(Wallet):
 
         if self.response_data:
             response = json.loads(self.response_data)
-            logger.info(f"Response: {response}")
             if response["result_type"] == "pay_invoice":
+                logger.info("Response: pay_invoice")
                 self.response_event.clear()
                 fee_msat = None
                 preimage = None
@@ -394,11 +393,45 @@ class NostrWalletConnectWallet(Wallet):
                 ok=False, error_message="Error. Invoice not paid."
             )
 
-    async def get_invoice_status(self, *_, **__) -> PaymentStatus:
-        return PaymentStatus(None)
+    async def get_invoice_status(self, checking_id: str) -> PaymentStatus:
+        return await self.get_payment_status(checking_id)
 
-    async def get_payment_status(self, *_, **__) -> PaymentStatus:
-        return PaymentStatus(None)
+
+    async def get_payment_status(self, checking_id: str) -> PaymentStatus:
+        logger.info(f'Checking payment status for {checking_id}')
+        eventdata = {
+            "method": "lookup_invoice",
+            "params": {
+                "payment_hash": checking_id,
+            }
+        }
+        event = self.build_encrypted_event(json.dumps(eventdata), self.secret, self.wallet_connect_service_pubkey,
+                                           EventKind.WALLET_CONNECT_REQUEST)
+        await self.nostr_client.publish_nostr_event(event)
+        await self.response_event.wait()
+
+        if self.response_data:
+            response = json.loads(self.response_data)
+            if response["result_type"] == "lookup_invoice":
+                logger.info("Response: lookup_invoice")
+                statuses = {
+                    0: None,  # NON_EXISTENT
+                    1: None,  # IN_FLIGHT
+                    2: True,  # SUCCEEDED
+                    3: False,  # FAILED
+                }
+
+                self.response_event.clear()
+
+                if response.get("result", {}).get("settled_at", None):
+                    settled_at = response.get("result", {}).get("settled_at", None)
+                    fees_paid = response.get("result", {}).get("fees_paid", None)
+                    preimage = response.get("result", {}).get("preimage", None)
+                    return PaymentStatus(paid=True, fee_msat=fees_paid, preimage=preimage)
+                else:
+                    return PaymentStatus(paid=False)
+        else:
+            return PaymentStatus(paid=False)
 
     async def paid_invoices_stream(self) -> AsyncGenerator[str, None]:
         yield ""
@@ -421,7 +454,6 @@ class NostrWalletConnectWallet(Wallet):
 
         while True:
             message = await nostr_client.get_event()
-            logger.info(f"Received message: {message}")
             await self.process_nostr_message(message)
 
     async def subscribe_to_wallet_service(self, nostr_client: NostrClient):
@@ -436,17 +468,14 @@ class NostrWalletConnectWallet(Wallet):
         try:
             type, *rest = json.loads(msg)
             logger.info(f"Type: {type}")
-            logger.info(f"Rest: {rest}")
 
             if type.upper() == "EVENT":
                 _, event = rest
-                logger.info(f"Event: {event}")
                 event = NostrEvent(**event)
                 if event.kind == 4:
-                    logger.info(f"Received DM: {event.content}")
                     await self._handle_nip04_message(event)
                 elif event.kind == EventKind.WALLET_CONNECT_RESPONSE:
-                    logger.info(f"Received Wallet Connect Response: {event.content}")
+                    logger.info(f"Received Wallet Connect Response")
                     message = await self._handle_nip04_message(event)
                     self.response_data = message
                     self.response_event.set()
@@ -457,9 +486,7 @@ class NostrWalletConnectWallet(Wallet):
 
     async def _handle_nip04_message(self, event: NostrEvent):
         sender_public_key = event.pubkey
-        logger.info(f"Received DM from {sender_public_key}")
         message = self.decrypt_message(event.content, self.secret, sender_public_key)
-        logger.info(f"Decrypted message: {message}")
         return message
 
     def sign_hash(self, private_key: str, hash: bytes) -> str:
@@ -477,7 +504,6 @@ class NostrWalletConnectWallet(Wallet):
                               event_type: EventKind) -> NostrEvent:
         content = self.encrypt_message(message, from_privkey, to_pubkey)
         this_pubkey = derive_public_key(from_privkey)
-        logger.info(f"this_pubkey: {this_pubkey}")
         event = NostrEvent(
             pubkey=this_pubkey,
             created_at=round(time.time()),
@@ -486,7 +512,6 @@ class NostrWalletConnectWallet(Wallet):
             content=content,
         )
         event.id = event.event_id
-        logger.info(f"event.id: {event.id}")
         event.sig = self.sign_hash(from_privkey, bytes.fromhex(event.id))
 
         return event
