@@ -384,10 +384,10 @@ class NostrWalletConnectWallet(Wallet):
                 else:
                     fee_msat = None
                     preimage = response["result"]["preimage"]
-                    payment_hash = hashlib.sha256(bytes.fromhex(preimage)).hexdigest()
+                    checking_id = hashlib.sha256(bytes.fromhex(preimage)).hexdigest()
 
                 return PaymentResponse(
-                    ok=True, checking_id=payment_hash, fee_msat=fee_msat, preimage=preimage, error_message=error_message
+                    ok=True, checking_id=checking_id, fee_msat=fee_msat, preimage=preimage, error_message=error_message
                 )
         else:
             return PaymentResponse(
