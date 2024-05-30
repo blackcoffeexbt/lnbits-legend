@@ -357,7 +357,7 @@ class NostrWalletConnectWallet(Wallet):
             return InvoiceResponse(False, None, None, "No response received")
 
     async def pay_invoice(self, bolt11: str, fee_limit_msat: int) -> PaymentResponse:
-        logger.info("Create an invoice")
+        logger.info("Pay an invoice")
         eventdata = {
             "method": "pay_invoice",
             "params": {
@@ -367,10 +367,32 @@ class NostrWalletConnectWallet(Wallet):
         event = self.build_encrypted_event(json.dumps(eventdata), self.secret, self.wallet_connect_service_pubkey,
                                            EventKind.WALLET_CONNECT_REQUEST)
         await self.nostr_client.publish_nostr_event(event)
+        await self.response_event.wait()
 
-        return PaymentResponse(
-            ok=False, error_message="NostrWalletConnectWallet cannot pay invoices."
-        )
+        if self.response_data:
+            response = json.loads(self.response_data)
+            logger.info(f"Response: {response}")
+            if response["result_type"] == "pay_invoice":
+                self.response_event.clear()
+                fee_msat = None
+                preimage = None
+                error_message = None
+                checking_id = None
+
+                if response["result"]["error"]:
+                    error_message = f'{response["result"]["error"]["code"]}: {response["result"]["error"]["message"]}'
+                else:
+                    fee_msat = None
+                    preimage = response["result"]["preimage"]
+                    checking_id = resp.payment_hash
+
+                return PaymentResponse(
+                    ok=True, checking_id=checking_id, fee_msat=fee_msat, preimage=preimage, error_message=error_message
+                )
+        else:
+            return PaymentResponse(
+                ok=False, error_message="Error. Invoice not paid."
+            )
 
     async def get_invoice_status(self, *_, **__) -> PaymentStatus:
         return PaymentStatus(None)
