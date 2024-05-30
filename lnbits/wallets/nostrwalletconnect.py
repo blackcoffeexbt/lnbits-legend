@@ -379,15 +379,15 @@ class NostrWalletConnectWallet(Wallet):
                 error_message = None
                 checking_id = None
 
-                if response["result"]["error"]:
+                if response.get("result", {}).get("error", None):
                     error_message = f'{response["result"]["error"]["code"]}: {response["result"]["error"]["message"]}'
                 else:
                     fee_msat = None
                     preimage = response["result"]["preimage"]
-                    checking_id = resp.payment_hash
+                    payment_hash = hashlib.sha256(bytes.fromhex(preimage)).hexdigest()
 
                 return PaymentResponse(
-                    ok=True, checking_id=checking_id, fee_msat=fee_msat, preimage=preimage, error_message=error_message
+                    ok=True, checking_id=payment_hash, fee_msat=fee_msat, preimage=preimage, error_message=error_message
                 )
         else:
             return PaymentResponse(
