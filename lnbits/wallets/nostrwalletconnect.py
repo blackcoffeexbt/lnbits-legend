@@ -163,97 +163,28 @@ class NostrClient:
             self,
             public_keys: List[str],
     ):
-        dm_time = int(time.time())
-        dm_filters = self._filters_for_nostr_wallet_connect_messages(public_keys, dm_time)
+        nwc_time = int(time.time())
+        nwc_filters = self._filters_for_nostr_wallet_connect_messages(public_keys, nwc_time)
 
         self.subscription_id = "nostrwalletconnect-" + urlsafe_short_hash()[:32]
-        await self.send_req_queue.put(["REQ", self.subscription_id] + dm_filters)
-        # log dm_filters
-        logger.debug(dm_filters)
+        await self.send_req_queue.put(["REQ", self.subscription_id] + nwc_filters)
+        # log nwc_filters
+        logger.debug(nwc_filters)
 
         logger.info(
             f"Subscribed to events for: {len(public_keys)} keys. New subscription id: {self.subscription_id}"
         )
 
-    async def subscribe_merchants(
-            self,
-            public_keys: List[str],
-            dm_time=0,
-            stall_time=0,
-            product_time=0,
-            profile_time=0,
-    ):
-        dm_filters = self._filters_for_direct_messages(public_keys, dm_time)
-        stall_filters = self._filters_for_stall_events(public_keys, stall_time)
-        product_filters = self._filters_for_product_events(public_keys, product_time)
-        profile_filters = self._filters_for_user_profile(public_keys, profile_time)
-
-        merchant_filters = (
-                dm_filters + stall_filters + product_filters + profile_filters
-        )
-
-        self.subscription_id = "nostrmarket-" + urlsafe_short_hash()[:32]
-        await self.send_req_queue.put(["REQ", self.subscription_id] + merchant_filters)
-
-        logger.debug(
-            f"Subscribed to events for: {len(public_keys)} keys. New subscription id: {self.subscription_id}"
-        )
-
-    async def merchant_temp_subscription(self, pk, duration=10):
-        dm_filters = self._filters_for_direct_messages([pk], 0)
-        stall_filters = self._filters_for_stall_events([pk], 0)
-        product_filters = self._filters_for_product_events([pk], 0)
-        profile_filters = self._filters_for_user_profile([pk], 0)
-
-        merchant_filters = (
-                dm_filters + stall_filters + product_filters + profile_filters
-        )
-
-        subscription_id = "merchant-" + urlsafe_short_hash()[:32]
-        logger.debug(
-            f"New merchant temp subscription ({duration} sec). Subscription id: {subscription_id}"
-        )
-        await self.send_req_queue.put(["REQ", subscription_id] + merchant_filters)
-
-        async def unsubscribe_with_delay(sub_id, d):
-            await asyncio.sleep(d)
-            await self.unsubscribe(sub_id)
-
-        asyncio.create_task(unsubscribe_with_delay(subscription_id, duration))
-
-    async def user_profile_temp_subscribe(self, public_key: str, duration=5) -> List:
-        try:
-            profile_filter = [{"kinds": [0], "authors": [public_key]}]
-            subscription_id = "profile-" + urlsafe_short_hash()[:32]
-            logger.debug(
-                f"New user temp subscription ({duration} sec). Subscription id: {subscription_id}"
-            )
-            await self.send_req_queue.put(["REQ", subscription_id] + profile_filter)
-
-            async def unsubscribe_with_delay(sub_id, d):
-                await asyncio.sleep(d)
-                await self.unsubscribe(sub_id)
-
-            asyncio.create_task(unsubscribe_with_delay(subscription_id, duration))
-        except Exception as ex:
-            logger.debug(ex)
-
-    def _filters_for_direct_messages(self, public_keys: List[str], since: int) -> List:
-        out_messages_filter = {"kinds": [4], "authors": public_keys}
-        if since and since != 0:
-            out_messages_filter["since"] = since
-
-        return [out_messages_filter]
-
     def _filters_for_nostr_wallet_connect_messages(self, public_keys: List[str], since: int) -> List:
-        out_messages_filter = {"kinds": [EventKind.WALLET_CONNECT_INFO, EventKind.WALLET_CONNECT_REQUEST, EventKind.WALLET_CONNECT_RESPONSE], "authors": public_keys}
+        out_messages_filter = {"kinds": [EventKind.WALLET_CONNECT_INFO, EventKind.WALLET_CONNECT_REQUEST,
+                                         EventKind.WALLET_CONNECT_RESPONSE], "authors": public_keys}
         if since and since != 0:
             out_messages_filter["since"] = since
 
         return [out_messages_filter]
 
     async def restart(self):
-        await self.unsubscribe_merchants()
+        await self.unsubscribe()
         # Give some time for the CLOSE events to propagate before restarting
         await asyncio.sleep(10)
 
@@ -265,18 +196,12 @@ class NostrClient:
         self.ws = None
 
     async def stop(self):
-        await self.unsubscribe_merchants()
+        await self.unsubscribe()
 
         # Give some time for the CLOSE events to propagate before closing the connection
         await asyncio.sleep(10)
         self.ws.close()
         self.ws = None
-
-    async def unsubscribe_merchants(self):
-        await self.send_req_queue.put(["CLOSE", self.subscription_id])
-        logger.debug(
-            f"Unsubscribed from all merchants events. Subscription id: {self.subscription_id}"
-        )
 
     async def unsubscribe(self, subscription_id):
         await self.send_req_queue.put(["CLOSE", subscription_id])
@@ -299,7 +224,7 @@ class NostrWalletConnectWallet(Wallet):
 
         async def _subscribe_to_nostr_client():
             # wait for 'nostrclient' extension to initialize
-            await asyncio.sleep(10)
+            await asyncio.sleep(5)
             await self.nostr_client.run_forever()
             raise ValueError("Must reconnect to websocket")
 
@@ -398,7 +323,6 @@ class NostrWalletConnectWallet(Wallet):
     async def get_invoice_status(self, checking_id: str) -> PaymentStatus:
         return await self.get_payment_status(checking_id)
 
-
     async def get_payment_status(self, checking_id: str) -> PaymentStatus:
         logger.info(f'Checking payment status for {checking_id}')
         eventdata = {
@@ -440,19 +364,8 @@ class NostrWalletConnectWallet(Wallet):
             return PaymentStatus(paid=False)
 
     async def paid_invoices_stream(self) -> AsyncGenerator[str, None]:
+        logger.info("Paid invoices stream call")
         yield ""
-
-    async def stub_receive_specific_message(self, uri, target_message):
-        async with websockets.connect(uri) as websocket:
-            while True:
-                message = await websocket.recv()
-                # remove whitespace and newlines
-                message = message.strip()
-                if message == target_message:
-                    print(f"Received target message: {message}")
-                    return message
-                else:
-                    print(f"Received another message: {message}")
 
     async def wait_for_nostr_events(self, nostr_client: NostrClient):
 
@@ -473,19 +386,21 @@ class NostrWalletConnectWallet(Wallet):
     async def process_nostr_message(self, msg: str):
         try:
             type, *rest = json.loads(msg)
-            logger.info(f"Type: {type}")
 
             if type.upper() == "EVENT":
                 _, event = rest
                 event = NostrEvent(**event)
-                if event.kind == 4:
-                    await self._handle_nip04_message(event)
-                elif event.kind == EventKind.WALLET_CONNECT_RESPONSE:
+                logger.debug(f"Event received: {event}")
+                if event.kind == EventKind.WALLET_CONNECT_RESPONSE:
                     logger.info(f"Received Wallet Connect Response")
                     message = await self._handle_nip04_message(event)
                     logger.debug(f"Message: {message}")
                     self.response_data = message
                     self.response_event.set()
+                elif event.kind == EventKind.WALLET_CONNECT_INFO:
+                    logger.info(f"Received Wallet Connect Info")
+                    message = await self._handle_nip04_message(event)
+                    logger.debug(f"Message: {message}")
                 return
 
         except Exception as ex:
