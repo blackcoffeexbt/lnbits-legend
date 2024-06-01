@@ -196,6 +196,7 @@ class LnTipsFundingSource(LNbitsSettings):
 class NostrWalletConnectWalletFundingSource(LNbitsSettings):
     nostr_wallet_connect_secret: Optional[str] = Field(default=None)
     nostr_wallet_connect_pubkey: Optional[str] = Field(default=None)
+    nostr_wallet_connect_relay: Optional[str] = Field(default=None)
 
 
 # todo: must be extracted

@@ -97,6 +97,7 @@ class NostrClient:
         self.send_req_queue: Queue = Queue()
         self.ws: WebSocketApp = None
         self.subscription_id = "nostrmarket-" + urlsafe_short_hash()[:32]
+        self.relay = settings.nostr_wallet_connect_relay
 
     async def connect_to_nostrclient_ws(
             self, on_open: Callable, on_message: Callable
@@ -105,10 +106,9 @@ class NostrClient:
             logger.warning(error)
 
         logger.info(f"Subscribing to websockets for nostrclient extension")
+        logger.debug("Relay: " + self.relay)
         ws = WebSocketApp(
-            # f"wss://relay.getalby.com/v1",
-            f"wss://relay.mutinywallet.com",
-            # f"ws://localhost:{settings.port}/nostrclient/api/v1/relay",
+            self.relay,
             on_message=on_message,
             on_open=on_open,
             on_error=on_error,
