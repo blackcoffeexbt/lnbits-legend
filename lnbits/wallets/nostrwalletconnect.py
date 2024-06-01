@@ -106,7 +106,8 @@ class NostrClient:
 
         logger.info(f"Subscribing to websockets for nostrclient extension")
         ws = WebSocketApp(
-            f"wss://relay.getalby.com/v1",
+            # f"wss://relay.getalby.com/v1",
+            f"wss://relay.mutinywallet.com",
             # f"ws://localhost:{settings.port}/nostrclient/api/v1/relay",
             on_message=on_message,
             on_open=on_open,
@@ -332,7 +333,7 @@ class NostrWalletConnectWallet(Wallet):
         eventdata = {
             "method": "make_invoice",
             "params": {
-                "amount": amount,
+                "amount": amount * 1000,
                 "memo": memo or "",
                 "description_hash": description_hash.hex() if description_hash else "",
             }
@@ -347,6 +348,7 @@ class NostrWalletConnectWallet(Wallet):
             logger.info("Response: make_invoice")
             if response["result_type"] == "make_invoice":
                 self.response_event.clear()  # Reset the event for future calls
+                logger.debug(f"Response: {response}")
                 payment_hash = response['result']['payment_hash']
                 payment_request = response['result']['invoice']
                 return InvoiceResponse(
@@ -423,14 +425,18 @@ class NostrWalletConnectWallet(Wallet):
 
                 self.response_event.clear()
 
-                if response.get("result", {}).get("settled_at", None):
+                logger.info(f"Response: {response}")
+
+                if response.get("result") and response.get("result", {}).get("settled_at", None):
                     settled_at = response.get("result", {}).get("settled_at", None)
                     fees_paid = response.get("result", {}).get("fees_paid", None)
                     preimage = response.get("result", {}).get("preimage", None)
                     return PaymentStatus(paid=True, fee_msat=fees_paid, preimage=preimage)
                 else:
+                    logger.debug("Payment not settled")
                     return PaymentStatus(paid=False)
         else:
+            logger.debug("Payment not settled: self.response_data")
             return PaymentStatus(paid=False)
 
     async def paid_invoices_stream(self) -> AsyncGenerator[str, None]:
@@ -477,6 +483,7 @@ class NostrWalletConnectWallet(Wallet):
                 elif event.kind == EventKind.WALLET_CONNECT_RESPONSE:
                     logger.info(f"Received Wallet Connect Response")
                     message = await self._handle_nip04_message(event)
+                    logger.debug(f"Message: {message}")
                     self.response_data = message
                     self.response_event.set()
                 return
