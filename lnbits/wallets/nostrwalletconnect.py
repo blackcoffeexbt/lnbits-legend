@@ -364,8 +364,53 @@ class NostrWalletConnectWallet(Wallet):
             return PaymentStatus(paid=False)
 
     async def paid_invoices_stream(self) -> AsyncGenerator[str, None]:
-        logger.info("Paid invoices stream call")
-        yield ""
+        sleep_time = 10
+        paid_invoices_stream_start_time = int(time.time())
+        while True:
+            try:
+                logger.debug("Getting paid invoices")
+                paid_invoices = await self.nwc_list_paid_invoices(paid_invoices_stream_start_time)
+                paid_invoices_stream_start_time = int(time.time())
+                logger.debug(f"Paid invoices: {paid_invoices}")
+                for invoice in paid_invoices:
+                    yield invoice["payment_hash"]
+            except Exception as ex:
+                logger.error(ex)
+            await asyncio.sleep(sleep_time)
+
+    async def nwc_list_paid_invoices(self, since_timestamp: int) -> List[Dict]:
+        logger.info(f'Getting transactions list')
+        eventdata = {
+            "method": "list_transactions",
+            "params": {
+                "limit": 5,
+                "unpaid": False,
+                "type": "incoming"
+            }
+        }
+        event = self.build_encrypted_event(json.dumps(eventdata), self.secret, self.wallet_connect_service_pubkey,
+                                           EventKind.WALLET_CONNECT_REQUEST)
+        await self.nostr_client.publish_nostr_event(event)
+        await self.response_event.wait()
+
+        if self.response_data:
+            response = json.loads(self.response_data)
+            if response["result_type"] == "list_transactions":
+                logger.info("Response: list_transactions")
+
+                self.response_event.clear()
+
+                logger.info(f"Response: {response}")
+
+                if response.get("result") and response.get("result", {}).get("transactions", None):
+                    logger.debug("Transactions found")
+                    return response.get("result", {}).get("transactions", [])
+                else:
+                    logger.debug("No transactions found")
+                    return []
+        else:
+            logger.debug("No transactions found:")
+            return []
 
     async def wait_for_nostr_events(self, nostr_client: NostrClient):
 
