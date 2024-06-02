@@ -162,9 +162,10 @@ class NostrClient:
     async def subscribe_wallet_service(
             self,
             public_keys: List[str],
+            recipient_public_keys: List[str] = None,
     ):
         nwc_time = int(time.time())
-        nwc_filters = self._filters_for_nostr_wallet_connect_messages(public_keys, nwc_time)
+        nwc_filters = self._filters_for_nostr_wallet_connect_messages(public_keys, nwc_time, recipient_public_keys)
 
         self.subscription_id = "nostrwalletconnect-" + urlsafe_short_hash()[:32]
         await self.send_req_queue.put(["REQ", self.subscription_id] + nwc_filters)
@@ -175,9 +176,9 @@ class NostrClient:
             f"Subscribed to events for: {len(public_keys)} keys. New subscription id: {self.subscription_id}"
         )
 
-    def _filters_for_nostr_wallet_connect_messages(self, public_keys: List[str], since: int) -> List:
+    def _filters_for_nostr_wallet_connect_messages(self, authors_public_keys: List[str], since: int, recipient_public_keys: List[str]) -> List:
         out_messages_filter = {"kinds": [EventKind.WALLET_CONNECT_INFO, EventKind.WALLET_CONNECT_REQUEST,
-                                         EventKind.WALLET_CONNECT_RESPONSE], "authors": public_keys}
+                                         EventKind.WALLET_CONNECT_RESPONSE], "authors": authors_public_keys, "#p": recipient_public_keys}
         if since and since != 0:
             out_messages_filter["since"] = since
 
@@ -214,12 +215,14 @@ class NostrWalletConnectWallet(Wallet):
         from lnbits.app import settings
 
         self.response_event = asyncio.Event()
+        self.list_invoices_response_event = asyncio.Event()
         self.response_data = None
         self.nostr_client = NostrClient()
 
         scheduled_tasks: List[Task] = []
 
         self.secret = settings.nostr_wallet_connect_secret
+        self.public_key = derive_public_key(self.secret)
         self.wallet_connect_service_pubkey = settings.nostr_wallet_connect_pubkey
 
         async def _subscribe_to_nostr_client():
@@ -391,14 +394,14 @@ class NostrWalletConnectWallet(Wallet):
         event = self.build_encrypted_event(json.dumps(eventdata), self.secret, self.wallet_connect_service_pubkey,
                                            EventKind.WALLET_CONNECT_REQUEST)
         await self.nostr_client.publish_nostr_event(event)
-        await self.response_event.wait()
+        await self.list_invoices_response_event.wait()
 
         if self.response_data:
             response = json.loads(self.response_data)
             if response["result_type"] == "list_transactions":
                 logger.info("Response: list_transactions")
 
-                self.response_event.clear()
+                self.list_invoices_response_event.clear()
 
                 logger.info(f"Response: {response}")
 
@@ -426,7 +429,7 @@ class NostrWalletConnectWallet(Wallet):
         logger.info(f"Wallet service pubkey: {settings.nostr_wallet_connect_pubkey}")
         public_keys = [settings.nostr_wallet_connect_pubkey]
 
-        await nostr_client.subscribe_wallet_service(public_keys)
+        await nostr_client.subscribe_wallet_service(public_keys, [self.public_key])
 
     async def process_nostr_message(self, msg: str):
         try:
@@ -438,10 +441,16 @@ class NostrWalletConnectWallet(Wallet):
                 logger.debug(f"Event received: {event}")
                 if event.kind == EventKind.WALLET_CONNECT_RESPONSE:
                     logger.info(f"Received Wallet Connect Response")
+                    logger.debug(f"Pub key is self.public_key: {self.public_key}")
                     message = await self._handle_nip04_message(event)
                     logger.debug(f"Message: {message}")
+                    data = json.loads(message)
                     self.response_data = message
-                    self.response_event.set()
+                    logger.debug(f"Result_type: {data.get('result_type')}")
+                    if data.get("result_type") == "list_transactions":
+                        self.list_invoices_response_event.set()
+                    else:
+                        self.response_event.set()
                 elif event.kind == EventKind.WALLET_CONNECT_INFO:
                     logger.info(f"Received Wallet Connect Info")
                     message = await self._handle_nip04_message(event)
