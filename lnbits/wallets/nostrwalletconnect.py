@@ -372,11 +372,15 @@ class NostrWalletConnectWallet(Wallet):
         while True:
             try:
                 logger.debug("Getting paid invoices")
-                paid_invoices = await self.nwc_list_paid_invoices(paid_invoices_stream_start_time)
-                paid_invoices_stream_start_time = int(time.time())
-                logger.debug(f"Paid invoices: {paid_invoices}")
-                for invoice in paid_invoices:
-                    yield invoice["payment_hash"]
+                try:
+                    timeout = 5
+                    paid_invoices = await asyncio.wait_for(self.nwc_list_paid_invoices(paid_invoices_stream_start_time), timeout)
+                    paid_invoices_stream_start_time = int(time.time())
+                    logger.debug(f"Paid invoices: {paid_invoices}")
+                    for invoice in paid_invoices:
+                        yield invoice["payment_hash"]
+                except asyncio.TimeoutError:
+                    print(f'Timeout occurred after waiting for {timeout} seconds')
             except Exception as ex:
                 logger.error(ex)
             await asyncio.sleep(sleep_time)
