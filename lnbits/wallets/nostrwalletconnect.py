@@ -271,22 +271,27 @@ class NostrWalletConnectWallet(Wallet):
         }
         event = self.build_encrypted_event(json.dumps(eventdata), self.secret, self.wallet_connect_service_pubkey,
                                            EventKind.WALLET_CONNECT_REQUEST)
-        await self.nostr_client.publish_nostr_event(event)
-        await self.create_invoice_response_event.wait()
+        try:
+            await asyncio.wait_for(self.nostr_client.publish_nostr_event(event), timeout=5)
+            await self.create_invoice_response_event.wait()
 
-        if self.response_data:
-            response = json.loads(self.response_data)
-            logger.info("Response: make_invoice")
-            if response["result_type"] == "make_invoice":
-                self.create_invoice_response_event.clear()  # Reset the event for future calls
-                logger.debug(f"Response: {response}")
-                payment_hash = response['result']['payment_hash']
-                payment_request = response['result']['invoice']
-                return InvoiceResponse(
-                    True, payment_hash, payment_request, None
-                )
-        else:
-            return InvoiceResponse(False, None, None, "No response received")
+            if self.response_data:
+                response = json.loads(self.response_data)
+                logger.info("Response: make_invoice")
+                if response["result_type"] == "make_invoice":
+                    self.create_invoice_response_event.clear()  # Reset the event for future calls
+                    logger.debug(f"Response: {response}")
+                    payment_hash = response['result']['payment_hash']
+                    payment_request = response['result']['invoice']
+                    return InvoiceResponse(
+                        True, payment_hash, payment_request, None
+                    )
+            else:
+                return InvoiceResponse(False, None, None, "No response received")
+        except Exception as ex:
+            logger.error(ex)
+            return InvoiceResponse(False, None, None, f"Error: {ex}")
+
 
     async def pay_invoice(self, bolt11: str, fee_limit_msat: int) -> PaymentResponse:
         logger.info("request pay_invoice")
