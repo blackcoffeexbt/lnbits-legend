@@ -214,8 +214,11 @@ class NostrWalletConnectWallet(Wallet):
         from lnbits.tasks import catch_everything_and_restart
         from lnbits.app import settings
 
-        self.response_event = asyncio.Event()
+        self.get_payment_status_response_event = asyncio.Event()
+        self.pay_invoice_response_event = asyncio.Event()
+        self.create_invoice_response_event = asyncio.Event()
         self.list_invoices_response_event = asyncio.Event()
+
         self.response_data = None
         self.nostr_client = NostrClient()
 
@@ -269,13 +272,13 @@ class NostrWalletConnectWallet(Wallet):
         event = self.build_encrypted_event(json.dumps(eventdata), self.secret, self.wallet_connect_service_pubkey,
                                            EventKind.WALLET_CONNECT_REQUEST)
         await self.nostr_client.publish_nostr_event(event)
-        await self.response_event.wait()
+        await self.create_invoice_response_event.wait()
 
         if self.response_data:
             response = json.loads(self.response_data)
             logger.info("Response: make_invoice")
             if response["result_type"] == "make_invoice":
-                self.response_event.clear()  # Reset the event for future calls
+                self.create_invoice_response_event.clear()  # Reset the event for future calls
                 logger.debug(f"Response: {response}")
                 payment_hash = response['result']['payment_hash']
                 payment_request = response['result']['invoice']
@@ -296,13 +299,13 @@ class NostrWalletConnectWallet(Wallet):
         event = self.build_encrypted_event(json.dumps(eventdata), self.secret, self.wallet_connect_service_pubkey,
                                            EventKind.WALLET_CONNECT_REQUEST)
         await self.nostr_client.publish_nostr_event(event)
-        await self.response_event.wait()
+        await self.pay_invoice_response_event.wait()
 
         if self.response_data:
             response = json.loads(self.response_data)
             if response["result_type"] == "pay_invoice":
                 logger.info("Response: pay_invoice")
-                self.response_event.clear()
+                self.pay_invoice_response_event.clear()
                 fee_msat = None
                 preimage = None
                 error_message = None
@@ -337,7 +340,7 @@ class NostrWalletConnectWallet(Wallet):
         event = self.build_encrypted_event(json.dumps(eventdata), self.secret, self.wallet_connect_service_pubkey,
                                            EventKind.WALLET_CONNECT_REQUEST)
         await self.nostr_client.publish_nostr_event(event)
-        await self.response_event.wait()
+        await self.get_payment_status_response_event.wait()
 
         if self.response_data:
             response = json.loads(self.response_data)
@@ -350,7 +353,7 @@ class NostrWalletConnectWallet(Wallet):
                     3: False,  # FAILED
                 }
 
-                self.response_event.clear()
+                self.get_payment_status_response_event.clear()
 
                 logger.info(f"Response: {response}")
 
@@ -453,8 +456,14 @@ class NostrWalletConnectWallet(Wallet):
                     logger.debug(f"Result_type: {data.get('result_type')}")
                     if data.get("result_type") == "list_transactions":
                         self.list_invoices_response_event.set()
+                    elif data.get("result_type") == "make_invoice":
+                        self.create_invoice_response_event.set()
+                    elif data.get("result_type") == "pay_invoice":
+                        self.pay_invoice_response_event.set()
+                    elif data.get("result_type") == "lookup_invoice":
+                        self.get_payment_status_response_event.set()
                     else:
-                        self.response_event.set()
+                        logger.error(f"Unknown result type: {data.get('result_type')}")
                 elif event.kind == EventKind.WALLET_CONNECT_INFO:
                     logger.info(f"Received Wallet Connect Info")
                     message = await self._handle_nip04_message(event)
