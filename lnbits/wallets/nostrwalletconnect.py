@@ -9,7 +9,8 @@ from typing import AsyncGenerator, Callable, Dict, List, Optional
 from loguru import logger
 from pydantic import BaseModel
 from secp256k1 import PublicKey
-from websocket import WebSocketApp
+from websocket import WebSocketApp, WebSocketConnectionClosedException
+
 
 from lnbits.helpers import urlsafe_short_hash
 from lnbits.nostrhelpers import (
@@ -88,13 +89,15 @@ class EventKind:
 
 
 class NostrClient:
-    def __init__(self):
+    def __init__(self, ping_interval: int = 30, reconnect_delay: int = 5):
         self.recieve_event_queue: Queue = Queue()
         self.send_req_queue: Queue = Queue()
         self.ws: WebSocketApp = None
         self.subscription_id = "nostrmarket-" + urlsafe_short_hash()[:32]
         self.relay = settings.nostr_wallet_connect_relay
         self.connected_event = asyncio.Event()
+        self.ping_interval = ping_interval
+        self.reconnect_delay = reconnect_delay
 
     async def connect_to_nostrclient_ws(
         self, on_open: Callable, on_message: Callable
@@ -107,16 +110,22 @@ class NostrClient:
             if on_open:
                 on_open(ws)
 
+        def on_close(_, close_status_code, close_msg):
+            logger.info(f"WebSocket closed with code: {close_status_code}, message: {close_msg}")
+            self.connected_event.clear()
+            self.ws = None
+
         logger.debug("Subscribing to websockets for nostrclient extension")
         logger.debug("Relay: " + self.relay)
         ws = WebSocketApp(
             self.relay,
             on_message=on_message,
             on_open=on_open_wrapper,
+            on_close=on_close,
             on_error=on_error,
         )
 
-        wst = Thread(target=ws.run_forever)
+        wst = Thread(target=ws.run_forever, kwargs={'ping_interval': self.ping_interval})
         wst.daemon = True
         wst.start()
 
@@ -139,28 +148,26 @@ class NostrClient:
 
         while running:
             try:
-                req = None
-                if not self.ws:
+                if not self.ws or not self.connected_event.is_set():
                     self.ws = await self.connect_to_nostrclient_ws(on_open, on_message)
-                    # be sure the connection is open
-                    await asyncio.sleep(3)
-                elif self.ws.sock and not self.ws.sock.connected:
-                    self.ws = await self.connect_to_nostrclient_ws(on_open, on_message)
-                    # be sure the connection is open
-                    await asyncio.sleep(3)
-                req = await self.send_req_queue.get()
+                    await self.connected_event.wait()
 
+                req = await self.send_req_queue.get()
                 if isinstance(req, ValueError):
                     running = False
                     logger.warning(str(req))
                 else:
                     self.ws.send(json.dumps(req))
+            except WebSocketConnectionClosedException:
+                logger.warning("WebSocket connection closed unexpectedly. Attempting to reconnect...")
+                self.ws = None
+                await sleep(self.reconnect_delay)
             except Exception as ex:
-                logger.warning(ex)
+                logger.warning(f"Error occurred: {ex}")
                 if req:
                     await self.send_req_queue.put(req)
-                self.ws = None  # todo close
-                await asyncio.sleep(5)
+                self.ws = None
+                await sleep(self.reconnect_delay)
 
     async def publish_nostr_event(self, e: NostrEvent):
         await self.send_req_queue.put(["EVENT", e.dict()])
@@ -476,7 +483,7 @@ class NostrWalletConnectWallet(Wallet):
         logger.info("Getting transactions list")
         eventdata = {
             "method": "list_transactions",
-            "params": {"limit": 10, "unpaid": False, "type": "incoming"},
+            "params": {"limit": 50, "unpaid": False, "type": "incoming"},
         }
         event = self.build_encrypted_event(
             json.dumps(eventdata),
