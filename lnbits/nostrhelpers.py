@@ -43,12 +43,13 @@ def encrypt_message(message: str, encryption_key, iv: Optional[bytes] = None) ->
     encryptor = cipher.encryptor()
     encrypted_message = encryptor.update(padded_data) + encryptor.finalize()
 
-    return f"{base64.b64encode(encrypted_message).decode()}?iv={base64.b64encode(iv).decode()}"
+    base64_encoded_content = base64.b64encode(encrypted_message).decode()
+    return f"{base64_encoded_content}?iv={base64.b64encode(iv).decode()}"
 
 
-def sign_message_hash(private_key: str, hash: bytes) -> str:
+def sign_message_hash(private_key: str, msg_hash: bytes) -> str:
     privkey = secp256k1.PrivateKey(bytes.fromhex(private_key))
-    sig = privkey.schnorr_sign(hash, None, raw=True)
+    sig = privkey.schnorr_sign(msg_hash, None, raw=True)
     return sig.hex()
 
 
