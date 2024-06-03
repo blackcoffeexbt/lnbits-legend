@@ -22,6 +22,7 @@ from .lndgrpc import LndWallet
 from .lndrest import LndRestWallet
 from .lnpay import LNPayWallet
 from .lntips import LnTipsWallet
+from .nostrwalletconnect import NostrWalletConnectWallet
 from .opennode import OpenNodeWallet
 from .phoenixd import PhoenixdWallet
 from .spark import SparkWallet

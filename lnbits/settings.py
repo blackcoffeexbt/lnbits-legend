@@ -251,6 +251,12 @@ class LnTipsFundingSource(LNbitsSettings):
     lntips_invoice_key: Optional[str] = Field(default=None)
 
 
+class NostrWalletConnectWalletFundingSource(LNbitsSettings):
+    nostr_wallet_connect_secret: Optional[str] = Field(default=None)
+    nostr_wallet_connect_pubkey: Optional[str] = Field(default=None)
+    nostr_wallet_connect_relay: Optional[str] = Field(default=None)
+
+
 class LightningSettings(LNbitsSettings):
     lightning_invoice_expiry: int = Field(default=3600)
 
@@ -271,6 +277,7 @@ class FundingSourcesSettings(
     OpenNodeFundingSource,
     SparkFundingSource,
     LnTipsFundingSource,
+    NostrWalletConnectWalletFundingSource,
 ):
     lnbits_backend_wallet_class: str = Field(default="VoidWallet")
 
@@ -423,6 +430,7 @@ class SuperUserSettings(LNbitsSettings):
             "LNPayWallet",
             "LnTipsWallet",
             "LndWallet",
+            "NostrWalletConnectWallet",
             "OpenNodeWallet",
             "PhoenixdWallet",
             "VoidWallet",
