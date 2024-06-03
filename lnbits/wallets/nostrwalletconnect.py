@@ -476,7 +476,7 @@ class NostrWalletConnectWallet(Wallet):
         logger.info("Getting transactions list")
         eventdata = {
             "method": "list_transactions",
-            "params": {"limit": 10, "unpaid": True, "type": "incoming"},
+            "params": {"limit": 10, "unpaid": False, "type": "incoming"},
         }
         event = self.build_encrypted_event(
             json.dumps(eventdata),
