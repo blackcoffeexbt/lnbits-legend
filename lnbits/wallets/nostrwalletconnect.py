@@ -94,6 +94,7 @@ class NostrClient:
         self.ws: WebSocketApp = None
         self.subscription_id = "nostrmarket-" + urlsafe_short_hash()[:32]
         self.relay = settings.nostr_wallet_connect_relay
+        self.connected_event = asyncio.Event()
 
     async def connect_to_nostrclient_ws(
             self, on_open: Callable, on_message: Callable
@@ -101,12 +102,18 @@ class NostrClient:
         def on_error(_, error):
             logger.warning(error)
 
+        def on_open_wrapper(ws):
+            logger.info("Connected to 'nostrclient' websocket")
+            self.connected_event.set()  # Set the event here
+            if on_open:
+                on_open(ws)
+
         logger.debug("Subscribing to websockets for nostrclient extension")
         logger.debug("Relay: " + self.relay)
         ws = WebSocketApp(
             self.relay,
             on_message=on_message,
-            on_open=on_open,
+            on_open=on_open_wrapper,
             on_error=on_error,
         )
 
@@ -232,6 +239,7 @@ class NostrWalletConnectWallet(Wallet):
         self.pay_invoice_response_event = asyncio.Event()
         self.create_invoice_response_event = asyncio.Event()
         self.list_invoices_response_event = asyncio.Event()
+        self.get_balance_response_event = asyncio.Event()
 
         self.response_data = None
         self.nostr_client = NostrClient()
@@ -246,11 +254,12 @@ class NostrWalletConnectWallet(Wallet):
             # wait for 'nostrclient' extension to initialize
             await asyncio.sleep(5)
             await self.nostr_client.run_forever()
+            await self.nostr_client.connected_event.wait()
             raise ValueError("Must reconnect to websocket")
 
         async def _wait_for_nostr_events():
             # wait for this extension to initialize
-            await asyncio.sleep(15)
+            await asyncio.sleep(5)
             await self.wait_for_nostr_events(self.nostr_client)
 
         loop = asyncio.get_event_loop()
@@ -260,12 +269,48 @@ class NostrWalletConnectWallet(Wallet):
         task2 = loop.create_task(catch_everything_and_restart(_wait_for_nostr_events))
         scheduled_tasks.extend([task1, task2])
 
+        # wait for the nostrclient ws to be connected before proceeding
+
     async def status(self) -> StatusResponse:
-        logger.warning(
-            "This NostrWalletConnectWallet backend does nothing, it is here just as a placeholder, you must"
-            " configure an actual backend before being able to do anything useful with"
-            " LNbits."
-        )
+        # logger.warning(
+        #     "This NostrWalletConnectWallet backend does nothing, it is here just as a placeholder, you must"
+        #     " configure an actual backend before being able to do anything useful with"
+        #     " LNbits."
+        # )
+
+        # if websocket is connected
+        if self.nostr_client.ws and self.nostr_client.ws.sock.connected:
+            logger.debug("Getting wallet balance")
+            eventdata = {
+                "method": "get_balance",
+                "params": {},
+            }
+            event = self.build_encrypted_event(
+                json.dumps(eventdata),
+                self.secret,
+                self.wallet_connect_service_pubkey,
+                EventKind.WALLET_CONNECT_REQUEST,
+            )
+            try:
+                await asyncio.wait_for(
+                    self.nostr_client.publish_nostr_event(event), timeout=5
+                )
+                await self.get_balance_response_event.wait()
+
+                if self.response_data:
+                    response = json.loads(self.response_data)
+                    logger.debug("Response: get_balance")
+                    if response["result_type"] == "get_balance":
+                        self.create_invoice_response_event.clear()  # Reset the event for future calls
+                        logger.debug(f"Response: {response}")
+                        balance = response["result"]["balance"]
+                        return StatusResponse(None, balance)
+                else:
+                    return StatusResponse("No balance response received", 0)
+            except Exception as ex:
+                logger.error(ex)
+                return StatusResponse("Exception getting balance", 0)
+
         return StatusResponse(None, 0)
 
     async def cleanup(self):
@@ -505,6 +550,8 @@ class NostrWalletConnectWallet(Wallet):
                         self.pay_invoice_response_event.set()
                     elif data.get("result_type") == "lookup_invoice":
                         self.get_payment_status_response_event.set()
+                    elif data.get("result_type") == "get_balance":
+                        self.get_balance_response_event.set()
                     else:
                         logger.error(f"Unknown result type: {data.get('result_type')}")
                 elif event.kind == EventKind.WALLET_CONNECT_INFO:
