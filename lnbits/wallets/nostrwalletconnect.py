@@ -343,6 +343,11 @@ class NostrWalletConnectWallet(Wallet):
             EventKind.WALLET_CONNECT_REQUEST,
         )
         try:
+            try:
+                logger.debug(f"Websocket open: {self.nostr_client.ws.sock.connected}")
+            except Exception as ex:
+                logger.error(ex)
+
             await asyncio.wait_for(
                 self.nostr_client.publish_nostr_event(event), timeout=5
             )
@@ -377,6 +382,10 @@ class NostrWalletConnectWallet(Wallet):
             self.wallet_connect_service_pubkey,
             EventKind.WALLET_CONNECT_REQUEST,
         )
+        try:
+            logger.debug(f"Websocket open: {self.nostr_client.ws.sock.connected}")
+        except Exception as ex:
+            logger.error(ex)
         await self.nostr_client.publish_nostr_event(event)
         await self.pay_invoice_response_event.wait()
 
