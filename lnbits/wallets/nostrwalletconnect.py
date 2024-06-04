@@ -414,71 +414,72 @@ class NostrWalletConnectWallet(Wallet):
         return await self.get_payment_status(checking_id)
 
     async def get_payment_status(self, checking_id: str) -> PaymentStatus:
-        # logger.debug(f"Checking payment status for {checking_id}")
-        # eventdata = {
-        #     "method": "lookup_invoice",
-        #     "params": {
-        #         "payment_hash": checking_id,
-        #     },
-        # }
-        # event = self.build_encrypted_event(
-        #     json.dumps(eventdata),
-        #     self.secret,
-        #     self.wallet_connect_service_pubkey,
-        #     EventKind.WALLET_CONNECT_REQUEST,
-        # )
-        # await self.nostr_client.publish_nostr_event(event)
-        # await self.get_payment_status_response_event.wait()
-        #
-        # if self.response_data:
-        #     response = json.loads(self.response_data)
-        #     logger.debug("Response: get_payment_status")
-        #     logger.debug(response)
-        #     if response["result_type"] == "lookup_invoice":
-        #         logger.debug("Response: lookup_invoice")
-        #
-        #         self.get_payment_status_response_event.clear()
-        #
-        #         logger.debug(f"Response: {response}")
-        #
-        #         if response.get("result") and response.get("result", {}).get(
-        #             "settled_at", None
-        #         ):
-        #             fees_paid = response.get("result", {}).get("fees_paid", None)
-        #             preimage = response.get("result", {}).get("preimage", None)
-        #             return PaymentStatus(
-        #                 paid=True, fee_msat=fees_paid, preimage=preimage
-        #             )
-        #         else:
-        #             logger.debug("Payment not settled")
-        #             return PaymentStatus(paid=False)
-        #     else:
-        #         logger.debug("result_type not lookup_invoice")
-        return PaymentStatus(paid=False)
+        logger.debug(f"Checking payment status for {checking_id}")
+        eventdata = {
+            "method": "lookup_invoice",
+            "params": {
+                "payment_hash": checking_id,
+            },
+        }
+        event = self.build_encrypted_event(
+            json.dumps(eventdata),
+            self.secret,
+            self.wallet_connect_service_pubkey,
+            EventKind.WALLET_CONNECT_REQUEST,
+        )
+        await self.nostr_client.publish_nostr_event(event)
+        await self.get_payment_status_response_event.wait()
+
+        if self.response_data:
+            response = json.loads(self.response_data)
+            logger.debug("Response: get_payment_status")
+            logger.debug(response)
+            if response["result_type"] == "lookup_invoice":
+                logger.debug("Response: lookup_invoice")
+
+                self.get_payment_status_response_event.clear()
+
+                logger.debug(f"Response: {response}")
+
+                if response.get("result") and response.get("result", {}).get(
+                    "settled_at", None
+                ):
+                    fees_paid = response.get("result", {}).get("fees_paid", None)
+                    preimage = response.get("result", {}).get("preimage", None)
+                    return PaymentStatus(
+                        paid=True, fee_msat=fees_paid, preimage=preimage
+                    )
+                else:
+                    logger.debug("Payment not settled")
+                    return PaymentStatus(paid=False)
+            else:
+                logger.debug("result_type not lookup_invoice")
+                return PaymentStatus(paid=False)
 
     async def paid_invoices_stream(self) -> AsyncGenerator[str, None]:
-        sleep_time = 10
-        paid_invoices_stream_start_time = int(time.time())
-        while True:
-            try:
-                logger.debug("Getting paid invoices")
-                logger.debug(f"Websocket open: {self.nostr_client.ws.sock.connected}")
-                try:
-                    timeout = 5
-                    paid_invoices = await asyncio.wait_for(
-                        self.nwc_list_paid_invoices(paid_invoices_stream_start_time),
-                        timeout,
-                    )
-                    paid_invoices_stream_start_time = int(time.time())
-                    logger.debug(f"Paid invoices: {paid_invoices}")
-                    if paid_invoices:
-                        for invoice in paid_invoices:
-                            yield invoice["payment_hash"]
-                except asyncio.TimeoutError:
-                    print(f"Timeout occurred after waiting for {timeout} seconds")
-            except Exception as ex:
-                logger.error(ex)
-            await asyncio.sleep(sleep_time)
+        yield ""
+        # sleep_time = 10
+        # paid_invoices_stream_start_time = int(time.time())
+        # while True:
+        #     try:
+        #         logger.debug("Getting paid invoices")
+        #         logger.debug(f"Websocket open: {self.nostr_client.ws.sock.connected}")
+        #         try:
+        #             timeout = 5
+        #             paid_invoices = await asyncio.wait_for(
+        #                 self.nwc_list_paid_invoices(paid_invoices_stream_start_time),
+        #                 timeout,
+        #             )
+        #             paid_invoices_stream_start_time = int(time.time())
+        #             logger.debug(f"Paid invoices: {paid_invoices}")
+        #             if paid_invoices:
+        #                 for invoice in paid_invoices:
+        #                     yield invoice["payment_hash"]
+        #         except asyncio.TimeoutError:
+        #             print(f"Timeout occurred after waiting for {timeout} seconds")
+        #     except Exception as ex:
+        #         logger.error(ex)
+        #     await asyncio.sleep(sleep_time)
 
     async def nwc_list_paid_invoices(self, since_timestamp: int) -> List[Dict]:
         logger.info("Getting transactions list")
