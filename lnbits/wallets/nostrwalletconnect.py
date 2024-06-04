@@ -245,7 +245,6 @@ class NostrWalletConnectWallet(Wallet):
         self.get_payment_status_response_event = asyncio.Event()
         self.pay_invoice_response_event = asyncio.Event()
         self.create_invoice_response_event = asyncio.Event()
-        self.list_invoices_response_event = asyncio.Event()
         self.get_balance_response_event = asyncio.Event()
 
         self.response_data = None
@@ -466,65 +465,10 @@ class NostrWalletConnectWallet(Wallet):
                 return PaymentStatus(paid=False)
 
     async def paid_invoices_stream(self) -> AsyncGenerator[str, None]:
-        yield ""
-        # sleep_time = 10
-        # paid_invoices_stream_start_time = int(time.time())
-        # while True:
-        #     try:
-        #         logger.debug("Getting paid invoices")
-        #         logger.debug(f"Websocket open: {self.nostr_client.ws.sock.connected}")
-        #         try:
-        #             timeout = 5
-        #             paid_invoices = await asyncio.wait_for(
-        #                 self.nwc_list_paid_invoices(paid_invoices_stream_start_time),
-        #                 timeout,
-        #             )
-        #             paid_invoices_stream_start_time = int(time.time())
-        #             logger.debug(f"Paid invoices: {paid_invoices}")
-        #             if paid_invoices:
-        #                 for invoice in paid_invoices:
-        #                     yield invoice["payment_hash"]
-        #         except asyncio.TimeoutError:
-        #             print(f"Timeout occurred after waiting for {timeout} seconds")
-        #     except Exception as ex:
-        #         logger.error(ex)
-        #     await asyncio.sleep(sleep_time)
-
-    async def nwc_list_paid_invoices(self, since_timestamp: int) -> List[Dict]:
-        logger.info("Getting transactions list")
-        eventdata = {
-            "method": "list_transactions",
-            "params": {"limit": 50, "unpaid": False, "type": "incoming"},
-        }
-        event = self.build_encrypted_event(
-            json.dumps(eventdata),
-            self.secret,
-            self.wallet_connect_service_pubkey,
-            EventKind.WALLET_CONNECT_REQUEST,
-        )
-        await self.nostr_client.publish_nostr_event(event)
-        await self.list_invoices_response_event.wait()
-
-        if self.response_data:
-            response = json.loads(self.response_data)
-            if response["result_type"] == "list_transactions":
-                logger.debug("Response: list_transactions")
-
-                self.list_invoices_response_event.clear()
-
-                logger.debug(f"Response: {response}")
-
-                if response.get("result") and response.get("result", {}).get(
-                    "transactions", None
-                ):
-                    logger.debug("Transactions found")
-                    return response.get("result", {}).get("transactions", [])
-                else:
-                    logger.debug("No transactions found")
-                    return []
-        else:
-            logger.debug("No transactions found:")
-            return []
+        self.queue: asyncio.Queue = asyncio.Queue(0)
+        while settings.lnbits_running:
+            value = await self.queue.get()
+            yield value
 
     async def wait_for_nostr_events(self, nostr_client: NostrClient):
 
@@ -555,9 +499,7 @@ class NostrWalletConnectWallet(Wallet):
                     data = json.loads(message)
                     self.response_data = message
                     logger.debug(f"Result_type: {data.get('result_type')}")
-                    if data.get("result_type") == "list_transactions":
-                        self.list_invoices_response_event.set()
-                    elif data.get("result_type") == "make_invoice":
+                    if data.get("result_type") == "make_invoice":
                         self.create_invoice_response_event.set()
                     elif data.get("result_type") == "pay_invoice":
                         self.pay_invoice_response_event.set()
