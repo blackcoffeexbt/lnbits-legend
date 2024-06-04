@@ -462,6 +462,7 @@ class NostrWalletConnectWallet(Wallet):
         while True:
             try:
                 logger.debug("Getting paid invoices")
+                logger.debug(f"Websocket open: {self.nostr_client.ws.sock.connected}")
                 try:
                     timeout = 5
                     paid_invoices = await asyncio.wait_for(
